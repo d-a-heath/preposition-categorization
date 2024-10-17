@@ -1,0 +1,417 @@
+---
+title: "R Notebook 6.25"
+output:
+  html_document:
+    df_print: paged
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook containing the logistic mixed-model analyis for **WORKING TITLE:Preposition Categorization**
+
+David Heath
+Stephanie Huette
+Philip Pavlik Jr.
+John Hollander
+
+Current library list.
+
+```{r libraries}
+library("readxl")
+library("lme4")
+library("ggplot2")
+library("ggeffects")
+library("XLConnect")
+library("DHARMa")
+library("performance")
+library("see")
+library("easystats")
+library("factoextra")
+library("NbClust")
+```
+
+
+## Data Prep
+
+### Load in cleaned dataset.
+
+Thirty-nine participants were recruited from the University of Memphis subject pool. A total of 22 participants are included in the cleaned dataset.Six participants did not meet the minimum inclusion criteria of being right-handed or ambidextrous (2) or monolingual English speakers (4). Four participants had a high number of missing trials due to outlier exclusion criteria and were also discarded from analysis. An additional seven participants were removed on the basis that they displayed no learning during the testing phase, indicated by a response pattern within 1SD of chance (50%) over a majority of continuum steps (6), or a majority response to one end of the continuum across all steps (1). Additionally, trials with response times greater than 2SD of the mean were excluded - this has been corrected as of 6.25 to reflect these metrics after removing participants listed above.
+
+
+
+```{r data}
+mydata.cleaned <- read_excel("C:/Users/daheath/OneDrive - The University of Memphis/Preposition Categorization/0 - Data/For R Final 2.xlsx", sheet = 3)
+
+colnames (mydata.cleaned) <- c("PartNum",
+                       "Item",
+                       "Step",
+                       "Distribution",
+                       "Familiarity", 
+                       "RResp")
+#summary (mydata.cleaned)
+
+##set factors and add centered step
+
+mydata.cleaned$Distribution <- factor(mydata.cleaned$Distribution)
+mydata.cleaned$Familiarity <- factor(mydata.cleaned$Familiarity)
+mydata.cleaned$centeredStep = mydata.cleaned$Step-5
+
+
+partcoeff.cleaned <- read_excel("C:/Users/daheath/OneDrive - The University of Memphis/Preposition Categorization/0 - Data/For R Final 2.xlsx", sheet = 4)
+colnames (partcoeff.cleaned) <- c("PartNum2",
+                       "coeff1",
+                       "coeff2",
+                       "coeff3",
+                       "coeff4")
+#summary (partco2)
+
+#for reasons unknown, we have to rewrite partcoeff into a new dataframe, or the merge code below wont work - your guess is as good as mine. Only took two hours to figure out. 
+
+partco2 <- data.frame(partcoeff.cleaned)
+
+#partcoeff colnames should be ok from sheet (PartNum, coeff1, coeff2, coeff3, coeff4) - coefficients are in same order as model
+```
+
+
+## Individual Coefficients & Clustering 
+
+### Individual Coefficients Model.
+
+This model is identical to the model used for the overall analysis, with the addition of participant (PartNum) as an interaction term for each fixed effect. This is a large model that generates a coefficient for each participant for each fixed effect. These coefficients were then used below for clustering. The output of this model is loaded in above as partcoeff.cleaned. 
+
+```{r individuals}
+#mydata$PartNum <- factor(mydata$PartNum)
+#mymix_part <- glmer(RResp ~ -1 + PartNum 
+ #                   + centeredStep:PartNum 
+  #                  + centeredStep:Distribution:PartNum 
+   #                 + centeredStep:Familiarity:PartNum 
+    #                + (1|PartNum) + (1|Item), 
+     #               data = mydata, 
+      #              family = binomial,
+       #             control = glmerControl(optimizer = "bobyqa",
+        #                                   optCtrl = list(maxfun=1e5)))
+#summary(mymix_part)
+
+#participant coefficients are now stored in the partcoeff dataframe
+```
+
+
+### Cluster Analysis
+ 
+The first step of our cluster analysis was determining the optimal number of groups, and to do this we used the three recommended methods: elbow, silhouette, and gap. 
+
+After correcting the trial exclusions, I think these outputs clearly favor two groups. Really, we're only predicting two groups (distribution-dominant and familiarity-dominant). Additionally, if we do three groups, one of the groups ends up really small, like 3 participants - probably not enough power there to even justify looking at. Some interpretation of the two-groups is offered below under the graphs. 
+
+Also included in this chunk is the kmeans for two groups. 
+ 
+```{r kmeans}
+#doing this again with problem participants removed
+# Elbow method
+fviz_nbclust(partco2[,c(2:5)], kmeans, method = "wss") +
+  geom_vline(xintercept = 2, linetype = 2)+
+  labs(subtitle = "Elbow method")
+
+# Silhouette method 
+fviz_nbclust(partco2[,c(2:5)], kmeans, method = "silhouette")+
+  labs(subtitle = "Silhouette method")
+
+# Gap statistic 
+
+set.seed(123)
+fviz_nbclust(partco2[,c(2:5)], kmeans, nstart = 25,  method = "gap_stat", nboot = 500)+
+  labs(subtitle = "Gap statistic method")
+
+
+#get clusters kmeans
+clusters2 <- kmeans(partco2[,c(2:5)], 2)
+#clusters3 <- kmeans(partco2[,c(2:5)], 3)
+
+#write clusters to own dfs
+clusters2.df <- data.frame(clusters2$cluster)
+#clusters3.df <- data.frame(clusters3$cluster)
+
+
+#add partnum to clusterdf for merging
+clusters2.df$PartNum <- partco2[,c(1)]
+#clusters3.df$PartNum <- partco2[,c(1)]
+
+
+#ok, now use merge to get group labels to line up with partnum, basically like a vlookup
+
+mydata_clusters2 <- merge(mydata.cleaned, clusters2.df, by = "PartNum")
+#mydata_clusters3 <- merge(mydata.cleaned, clusters3.df, by = "PartNum")
+
+
+```
+
+This chunk writes each group into a seperate data frame for use by the group models below. 
+
+```{r - group dfs}
+g1.1 <- subset(mydata_clusters2, clusters2.cluster == 1)
+g2.1 <- subset(mydata_clusters2, clusters2.cluster == 2)
+
+
+#g1.2 <- subset(mydata_clusters3, clusters3.cluster == 1)
+#g2.2 <- subset(mydata_clusters3, clusters3.cluster == 2)
+#g3.2 <- subset(mydata_clusters3, clusters3.cluster == 3)
+```
+
+
+## MODELS 
+
+
+### Overall Model.
+
+In terms of workflow, the overall model was built before the individual coefficients model above, but is presented here to keep like with like. Assumption checking and model performance is documented in the last section of the document. 
+
+Fixed effects for this model were determined by the IVs: Continuum Step Number (1-9, centered to (-4)-4), Spatial Distinction Familiarity (present in English = Familiar, not present in English = Novel), and Distribution (Overlapping and Non-Overlapping). 
+
+Random effects for this model were chosen following Meteyard & Davies (2020). Random intercepts for units, Participant and Item, and random slope for Step Number as a within-participant effect. The Item index in the data set includes condition, step number, and presentation order. In total there are 72 different items. 
+
+### Group Models.
+
+Presented here are group models for three groups. These group models are identical to the overall model, except that they only take a subset of the data (the group) as the input. Group data is stored in separate dataframes.
+
+```{r models}
+
+#overall model
+mymix <- glmer(RResp ~ centeredStep
+               + centeredStep:Distribution
+               + centeredStep:Familiarity
+               + (1+centeredStep|PartNum)
+               + (1+centeredStep | Item), 
+               data = mydata.cleaned, 
+               family = binomial, 
+               control = glmerControl(optimizer = "bobyqa"))
+#summary(mymix)
+
+#two group models
+
+mymix_g1.1 <- glmer(RResp ~ centeredStep
+                    + centeredStep:Distribution
+                    + centeredStep:Familiarity
+                    + (1+centeredStep|PartNum)
+                    + (1+centeredStep | Item),
+                    data = g1.1, 
+                    family = binomial,
+                    control = glmerControl(optimizer = "bobyqa"))
+#summary(mymix_g1.1)
+
+
+mymix_g2.1 <- glmer(RResp ~ centeredStep 
+                    + centeredStep:Distribution 
+                    + centeredStep:Familiarity 
+                    + (1+centeredStep|PartNum) 
+                    + (1+centeredStep|Item), 
+                    data = g2.1, 
+                    family = binomial,
+                    control = glmerControl(optimizer = "bobyqa"))
+#summary(mymix_g2.1)
+
+#three group models
+
+#mymix_g1.2 <- glmer(RResp ~ centeredStep
+ #                   + centeredStep:Distribution
+  #                  + centeredStep:Familiarity
+   #                 + (1+centeredStep|PartNum)
+    #                + (1+centeredStep | Item),
+     #               data = g1.2, 
+      #              family = binomial,
+       #             control = glmerControl(optimizer = "bobyqa"))
+#summary(mymix_g1.2)
+
+
+#mymix_g2.2 <- glmer(RResp ~ centeredStep 
+ #                   + centeredStep:Distribution 
+  #                  + centeredStep:Familiarity 
+   #                 + (1+centeredStep|PartNum) 
+    #                + (1+centeredStep|Item), 
+     #               data = g2.2, 
+      #              family = binomial,
+       #             control = glmerControl(optimizer = "bobyqa"))
+#summary(mymix_g2.2)
+
+#mymix_g3.2 <- glmer(RResp ~ centeredStep
+ #                   + centeredStep:Distribution
+  #                  + centeredStep:Familiarity
+   #                 +  (1+centeredStep|PartNum)
+    #                + (1+centeredStep | Item), 
+     #               data = g3.2, 
+      #              family = binomial,
+       #             control = glmerControl(optimizer = "bobyqa"))
+#summary(mymix_g3.2)
+```
+
+## Tables
+
+Now that those models have run, let's make a quick **table of the regression coefficients** so that we can see differences in magnitude and direction between the groups:
+```{r coeffs}
+rmat <- round(rbind(summary(mymix)$coefficients[,1],summary(mymix_g1.1)$coefficients[,1], summary(mymix_g2.1)$coefficients[,1]), 3)
+groupnames <- rbind("Overall", "Group 1", "Group 2")
+Logistic_regression_coefficients <- cbind(groupnames, rmat)
+Logistic_regression_coefficients
+
+#rmat <- round(rbind(summary(mymix)$coefficients[,1], summary(mymix_g1.2)$coefficients[,1], summary(mymix_g2.2)$coefficients[,1], summary(mymix_g3.2)$coefficients[,1]), 4)
+#groupnames <- rbind("Overall", "Group 1", "Group 2", "Group 3")
+#Logistic_regression_coefficients <- cbind(groupnames, rmat)
+#Logistic_regression_coefficients
+
+```
+...and another quick **table of p-values** so that we can see differences in patterns of significance:
+```{r pvals}
+pmat <- round(rbind(summary(mymix)$coefficients[,4],summary(mymix_g1.1)$coefficients[,4], summary(mymix_g2.1)$coefficients[,4]), 4)
+Logistic_regression_p_values <- cbind(groupnames, pmat)
+Logistic_regression_p_values
+
+#pmat <- round(rbind(summary(mymix)$coefficients[,4], summary(mymix_g1.2)$coefficients[,4], summary(mymix_g2.2)$coefficients[,4], summary(mymix_g3.2)$coefficients[,4]), 3)
+#Logistic_regression_p_values <- cbind(groupnames, pmat)
+#Logistic_regression_p_values
+```
+
+## PLOTS
+
+Now we're going to predict and plot some values from our models. 
+
+```{r}
+#MAIN MODEL
+pred_model1 <- predict_response(mymix, 
+                                terms = c("centeredStep", 
+                                          "Distribution", 
+                                          "Familiarity"), 
+                                type="fixed")
+plot(pred_model1)
+
+#Kmeans 2
+pred_g1.1 <- predict_response(mymix_g1.1, 
+                              terms = c("centeredStep", 
+                                        "Distribution", 
+                                        "Familiarity"), 
+                              type="fixed")
+plot(pred_g1.1)
+
+pred_g2.1 <- predict_response(mymix_g2.1, 
+                              terms = c("centeredStep",
+                                        "Distribution", 
+                                        "Familiarity"), 
+                              type="fixed")
+plot(pred_g2.1)
+
+#Kmeans 3
+
+#pred_g1.2 <- predict_response(mymix_g1.2, 
+ #                             terms = c("centeredStep", 
+  #                                      "Distribution", 
+   #                                     "Familiarity"), 
+    #                          type="fixed")
+#plot(pred_g1.2)
+
+#pred_g2.2 <- predict_response(mymix_g2.2, 
+ #                             terms = c("centeredStep",
+  #                                      "Distribution", 
+   #                                     "Familiarity"), 
+    #                          type="fixed")
+#plot(pred_g2.2)
+
+
+#pred_g3.2 <- predict_response(mymix_g3.2, 
+ #                             terms = c("centeredStep",
+  #                                      "Distribution", 
+   #                                     "Familiarity"), 
+    #                          type="fixed")
+#plot(pred_g3.2)
+```
+## Model Interpretation
+
+I think two groups is ok, and does match our predictions relatively well.
+
+We can clearly see all participants show distributional sensitivity for novel categories. For familiar categories, some participants are still sensitive to input distribution, while others overextend their category knowledge to overcome distributional noise.  
+
+## Comparing predicted and actual values
+
+```{r}
+#Need to load in a dataset that combines predicted and actual values. To match the predicted values, we'll be using averages of the actual values, caluculated in excel.
+
+datavis_all <- read_excel("C:/Users/daheath/OneDrive - The University of Memphis/Preposition Categorization/0 - Data/data vis FINAL 2.xlsx", sheet = 1)
+datavis_g1 <- read_excel("C:/Users/daheath/OneDrive - The University of Memphis/Preposition Categorization/0 - Data/data vis FINAL 2.xlsx", sheet = 2)
+datavis_g2 <- read_excel("C:/Users/daheath/OneDrive - The University of Memphis/Preposition Categorization/0 - Data/data vis FINAL 2.xlsx", sheet = 3)
+
+
+#predicted responses shown in red, actual responses shown in blue
+
+#overall
+ggplot(datavis_all, aes(x = centeredStep)) + 
+  geom_smooth(aes(y=PredRResp), color = "red") +
+                geom_smooth(aes(y=ActRResp)) +
+                              facet_wrap(Familiarity~Distribution)
+              
+#g1
+ggplot(datavis_g1, aes(x = centeredStep)) + 
+  geom_smooth(aes(y=PredRResp), color = "red") +
+                geom_smooth(aes(y=ActRResp)) +
+                              facet_wrap(Familiarity~Distribution)
+#g2
+ggplot(datavis_g2, aes(x = centeredStep)) + 
+  geom_smooth(aes(y=PredRResp), color = "red") +
+                geom_smooth(aes(y=ActRResp)) +
+                              facet_wrap(Familiarity~Distribution)
+#g3
+#ggplot(datavis_g3, aes(x = centeredStep)) + 
+ # geom_smooth(aes(y=predRResp), color = "red") +
+  #              geom_smooth(aes(y=OrigRResp)) +
+   #                           facet_wrap(Familiarity~Distribution)
+```
+
+Not sure what to say about these yet, but I think they show our fits are pretty good if a little off in a couple places. Also, it is not clear why the actual responses get some kind of error margins but the predicted values don't? 
+
+Open to ideas for making these (and above model plots) more presentable. Obviously I'll want to rename the axes and add titles.
+
+## Checking assumptions
+
+These are hidden here, but they look ok. Can unhide and run or refer to the 6.24 version of the notebook for outputs.
+
+```{r}
+#checking assumptions with DHARMa
+
+#simulation <- simulateResiduals(fittedModel = mymix, 
+ #                               plot = T)
+
+#residuals(simulation)
+
+#plot(simulation)
+#testQuantiles(simulation)
+
+#testCategorical(simulation, catPred = mydata.cleaned$centeredStep)
+
+#plotResiduals(simulation, form = mydata.cleaned$centeredStep)
+
+#plotResiduals(simulation, form = mydata.cleaned$Distribution)
+
+#plotResiduals(simulation, form = mydata.cleaned$Familiarity)
+
+
+#testUniformity(simulation)
+#testDispersion(simulation)
+```
+
+And this is our performance chunk
+```{r}
+#check_model(mymix)
+#model_performance(mymix)
+
+
+```
+
+
+
+## Reporting 
+```{r}
+#generate reports
+
+report(mymix)
+report(mymix_g1.1)
+report(mymix_g2.1)
+
+#report(mymix_g1.2)
+#report(mymix_g2.2)
+#report(mymix_g3.2)
+```
+
+
