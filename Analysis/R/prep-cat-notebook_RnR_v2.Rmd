@@ -1,0 +1,1043 @@
+---
+title: "Individual differences in the use of prior knowledge and distributional statistics during word learning RnR 2"
+output: html_notebook
+---
+#Setup
+```{r}
+#Packages
+library("lme4")
+library("tidyverse")
+library("ggeffects")
+library("factoextra")
+library("NbClust")
+library("sjPlot")
+library("readxl")
+library("MuMIn")
+library("patchwork")
+```
+
+```{r}
+#Load data
+data.raw <- read_xlsx("C:/Users/daheath/OneDrive - The University of Memphis/Team-LaBlab - Preposition Categorization/0 - Data/Preposition Categorization Data.xlsx", sheet = 1)
+```
+
+
+```{r}
+#clean data
+data <- data.raw %>% select(PartNum, Condition, Step, Distribution, Familiarity, step9, DeleteTrial, Delete2)
+
+data <- data %>% filter(DeleteTrial == 0 & Delete2 == 0)
+
+colnames(data) <- c("Participant",
+                          "Item",
+                          "Step",
+                          "Distribution",
+                          "Familiarity",
+                          "S9R",
+                          "Delete1",
+                          "Delete2")
+
+data$Participant <- as.factor(data$Participant)
+data$Item <- as.factor(data$Item)
+data$Step <- as.numeric(data$Step)
+data$Distribution <- as.factor(data$Distribution)
+data$Familiarity <- as.factor(data$Familiarity)
+
+
+data$centeredStep <- (data$Step - 5)
+```
+
+```{r}
+data.filtered <- data %>% filter(!Participant %in% c("4","5","7","13","19","24","31"))
+
+#This removes the non-learners
+```
+
+```{r}
+#individual performance
+step_avg_all <- function(x){
+  x %>%
+    #filter(Step %in% -4:4) %>%
+    group_by( centeredStep, Distribution, Familiarity) %>% #,Participant) %>%
+    summarise(step_average = mean(S9R, na.rm = TRUE), 
+    sd = sd(S9R, na.rm = TRUE),             # Calculate standard deviation
+    n = n(),                                   # Calculate sample size
+    se = sd / sqrt(n),
+    .groups = "drop")%>%
+  tidyr::complete(centeredStep = -4:4)# Participant,
+}
+
+step_avg_ind <- function(x){
+  x %>%
+    #filter(Step %in% -4:4) %>%
+    group_by(Participant, centeredStep, Distribution, Familiarity) %>% #) %>%
+    summarise(step_average = mean(S9R, na.rm = TRUE), 
+    sd = sd(S9R, na.rm = TRUE),             # Calculate standard deviation
+    n = n(),                                   # Calculate sample size
+    se = sd / sqrt(n),
+    .groups = "drop")%>%
+  tidyr::complete(Participant, centeredStep = -4:4)# 
+}
+```
+
+
+```{r}
+all_avg_S9R <- step_avg_all(data.filtered)
+
+averageS9R <- step_avg_ind(data.filtered)
+
+g1_avg_S9R <- data.withclusters %>% filter(Group == 1) %>% step_avg_all()
+
+g2_avg_S9R <- data.withclusters %>% filter(Group == 2) %>% step_avg_all()
+
+averageS9R_wide <- averageS9R %>% pivot_wider(names_from = centeredStep, values_from = step_average)
+```
+
+```{r}
+ggplot(averageS9R, aes(x = centeredStep, y = step_average,
+               group = Participant, color = Participant)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  labs(
+    x = "Centered Step",
+    y = "Proportion Step Nine Respsonse - S9R",
+    color = "Participant"
+  ) +
+  theme_minimal()
+
+averageS9R_filtered <- averageS9R %>% filter(!Participant %in% c("4","5","7","13","19","24","31"))
+
+learners <- 
+  ggplot(averageS9R_filtered, aes(x = centeredStep, y = step_average,
+               group = Participant, color = Participant)) +
+  geom_line(linewidth = 0.5) +
+  geom_point(size = 2) +
+  labs(
+    x = "Centered Step",
+    y = "Proportion Step Nine Respsonse - S9R",
+    color = "Participant"
+  ) +
+  theme_minimal()
+
+averageS9R_filtered2 <- averageS9R %>% filter(Participant %in% c("4","5","7","13","19","24","31"))
+
+nonlearners <- 
+  ggplot(averageS9R_filtered2, aes(x = centeredStep, y = step_average,
+               group = Participant, color = Participant)) +
+  geom_line(linewidth = 0.5) +
+  geom_point(size = 2) +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(
+    x = "Centered Step",
+    y = "Proportion Step Nine Respsonse - S9R",
+    color = "Participant"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+ggsave(
+  filename = "learners.png",
+  plot = learners,
+  width = 8,
+  height = 6,
+  units = "in",
+  dpi = 300
+)
+
+ggsave(
+  filename = "nonlearners.png",
+  plot = nonlearners,
+  width = 8,
+  height = 6,
+  units = "in",
+  dpi = 300
+)
+```
+
+
+```{r}
+#filtering based on established criteria
+#within 1SD of Chance (50%) across 50% or more of continua steps. 
+
+step9_SD <- sd(averageS9R$step_average)
+
+ex_lower <- (.5 - (step9_SD/2))
+ex_upper <- ((step9_SD/2) + .5)
+
+#exclusion_range <- seq(ex_lower, ex_upper, by = 0.01)
+
+averageS9R_wide <- averageS9R_wide %>%
+  rowwise() %>%  
+  mutate(
+    n_in_range = sum(c_across(2:10) >= ex_lower & c_across(2:10) <= ex_upper)
+  ) %>%
+  ungroup()
+
+
+
+Include_list <- averageS9R_wide %>% 
+  filter(n_in_range <= 5) %>%
+  pull(Participant) %>%
+  as.character() %>%
+  unique()
+
+Exclude_list <- averageS9R_wide %>%
+  filter(n_in_range >= 6) %>%
+  pull(Participant) %>%
+  as.character() %>%
+  unique()
+
+#P24 has to be manually removed. They have a clear bias toward S9R
+#This is  mostly just a sanity check
+
+```
+
+
+#Individual models
+```{r}
+#Fixed effect model
+#I need to figure out what going on with the random effects here - why Participant or centeredStep?
+#Do we need step in the model?
+
+parts_as_fixed <- glmer(S9R ~ -1 + Participant 
+                    + centeredStep:Participant 
+                    + centeredStep:Distribution:Participant 
+                    + centeredStep:Familiarity:Participant 
+                    +  (1+centeredStep | Item), #formerly + (1|Participant) + (1|Item)
+                    data = data.filtered, 
+                    family = binomial,
+                    control = glmerControl(optimizer = "bobyqa",
+                                           optCtrl = list(maxfun=1.5e5)))
+
+```
+
+```{r}
+#Random effect model
+
+parts_as_re <- glmer(S9R ~ centeredStep
+               + centeredStep:Distribution
+               + centeredStep:Familiarity
+               #+ centeredStep:Distribution:Familiarity #added for R1 - not significant
+               + (1+centeredStep + Distribution + Familiarity|Participant) #makes small diff
+               + (1+centeredStep | Item), 
+               data = data.filtered, 
+               family = binomial, 
+               control = glmerControl(optimizer = "bobyqa"))
+
+
+```
+
+```{r}
+#save model coefficients for both fixed and re models
+
+#fixed - rewrite using pipes?
+
+fixed <- as.data.frame(fixef(parts_as_fixed))
+
+fixed <- rownames_to_column(fixed, var = "parameters")
+
+colnames(fixed) <- c("parameters",
+                     "estimate")
+
+fixed$participant <- sub(":.*","", fixed$parameters)
+
+fixed$parameters_generic <- sub(".*:","",fixed$parameters)
+
+fixed$parameters_generic <- gsub("[0-9]+$"," ",fixed$parameters_generic)
+
+fixed_wide <- fixed %>% 
+  select(estimate, participant, parameters_generic) %>% 
+  pivot_wider(names_from = parameters_generic, values_from = estimate)
+
+#random
+
+re <- as.data.frame(ranef(parts_as_re))
+
+re_wide <- re %>% 
+  filter(grpvar == "Participant") %>% 
+  pivot_wider(names_from = term, values_from = c(condval,condsd))
+
+colnames(re_wide) <- c("grpvar",
+                       "Participant",
+                       "Intercept_est",
+                       "centeredStep_est",
+                       "DistributionOverlapping_est",
+                       "FamiliarityNovel_est",
+                       "Intercept_sd",
+                       "centeredStep_sd",
+                       "DistributionOverlapping_sd",
+                       "FamiliarityNovel_sd")
+            
+
+
+
+```
+
+```{r}
+#filter fixed and random effects
+```
+
+
+```{r}
+#Correlations / Agreement
+```
+
+#Clusters
+```{r}
+#Fixed cluster optimization
+
+fixed_wide_filtered <- fixed_wide %>% filter(!participant %in% c("Participant4","Participant5","Participant7","Participant13","Participant19","Participant24","Participant31"))
+
+# Elbow method
+fviz_nbclust(fixed_wide_filtered[,c(2:5)], kmeans, method = "wss") +
+  geom_vline(xintercept = 2, linetype = 2)+
+  labs(subtitle = "Elbow method")
+
+# Silhouette method 
+fviz_nbclust(fixed_wide_filtered[,c(2:5)], kmeans, method = "silhouette")+
+  labs(subtitle = "Silhouette method")
+
+# Gap statistic 
+
+set.seed(123)
+fviz_nbclust(fixed_wide_filtered[,c(2:5)], kmeans, nstart = 25,  method = "gap_stat", nboot = 500)+
+  labs(subtitle = "Gap statistic method")
+
+
+#get clusters kmeans
+clusters <- kmeans(fixed_wide_filtered[,c(2:5)], 2)
+
+#write clusters to own dfs
+clusters.df <- data.frame(clusters$cluster)
+
+
+#add partnum to clusterdf for merging
+clusters.df$participant <- fixed_wide_filtered[[1]]
+
+clusters.df$participant <- gsub("Participant","", clusters.df$participant)
+
+colnames(clusters.df) <- c("Group","Participant")
+
+data.withclusters <- merge(data.filtered, clusters.df, by = "Participant")
+
+g1 <- data.withclusters %>% filter(Group == 1)
+g2 <- data.withclusters %>% filter(Group == 2)
+
+```
+
+```{r}
+#Random effect cluster optimization
+
+re_wide_filtered <- re_wide %>% filter(!Participant %in% c("4","5","7","13","19","24","31"))
+
+# Elbow method
+fviz_nbclust(re_wide_filtered[,c(3:6)], kmeans, method = "wss") +
+  geom_vline(xintercept = 2, linetype = 2)+
+  labs(subtitle = "Elbow method")
+
+# Silhouette method 
+fviz_nbclust(re_wide_filtered[,c(3:6)], kmeans, method = "silhouette")+
+  labs(subtitle = "Silhouette method")
+
+# Gap statistic 
+
+set.seed(123)
+fviz_nbclust(re_wide_filtered[,c(3:6)], kmeans, nstart = 25,  method = "gap_stat", nboot = 500)+
+  labs(subtitle = "Gap statistic method")
+
+```
+
+
+
+#Models
+
+```{r}
+#Overall model
+
+main_model_ <- glmer(S9R ~ centeredStep
+               + centeredStep*Distribution*Familiarity #added for R1 - not significant      
+               #+ centeredStep:Distribution
+               #+ centeredStep:Familiarity
+               
+               + (1+centeredStep + Distribution + Familiarity|Participant) #makes small diff
+               + (1+centeredStep | Item), 
+               data = data.filtered, 
+               family = binomial, 
+               control = glmerControl(optimizer = "bobyqa"))
+
+#maximal model specification - Barr et al 2013
+```
+
+```{r}
+#Fixed effects groups models
+
+g1_fixed_model_ <- glmer(S9R ~ centeredStep
+               + centeredStep:Distribution
+               + centeredStep:Familiarity
+               #+ centeredStep:Distribution:Familiarity # not significant
+               + (1+centeredStep + Distribution + Familiarity|Participant) #makes small diff
+               + (1+centeredStep | Item), 
+               data = g1, 
+               family = binomial, 
+               control = glmerControl(optimizer = "bobyqa"))
+
+g2_fixed_model_ <- glmer(S9R ~ centeredStep
+               + centeredStep:Distribution
+               + centeredStep:Familiarity
+               #+ centeredStep:Distribution:Familiarity # not significant
+               + (1+centeredStep + Distribution + Familiarity|Participant) #makes small diff
+               + (1+centeredStep | Item), 
+               data = g2, 
+               family = binomial, 
+               control = glmerControl(optimizer = "bobyqa"))
+
+```
+
+```{r}
+#Random effects groups models
+# not even going to worry about it
+```
+
+#Plots
+```{r}
+#Overall model plot
+
+pred_main_model1 <- predict_response(main_model, 
+                                terms = c("centeredStep", 
+                                          "Distribution", 
+                                          "Familiarity"), 
+                                type="fixed")
+plot(pred_main_model1)
+```
+
+
+```{r}
+colnames(pred_main_model_recoded) <- c("centeredStep", "step_average", "se", "conf.low", "conf.high", "Distribution", "Familiarity")
+```
+
+
+```{r}
+pred_plot <- 
+  ggplot(pred_main_model_recoded, aes(x = centeredStep, y = step_average, shape = Distribution, linetype = Familiarity)) +
+  #facet_wrap(facet ~ group) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+    geom_ribbon(
+    data = ~ subset(.x, Familiarity == "Familiar"),
+    aes(ymin = conf.low, ymax = conf.high),
+    fill = "darkblue", alpha = .2, colour = NA
+  ) +
+    geom_point(size = 2) +
+    geom_ribbon(
+    data = ~ subset(.x, Familiarity == "Novel"),
+    aes(ymin = conf.low, ymax = conf.high),
+    fill = "red", alpha = 0.15, colour = NA
+  ) +
+  labs(
+    x = "Centered Step",
+    y = "Proportion Step Nine Response - S9R", 
+    color = "Participant"
+  ) +
+  theme_minimal()+
+  theme(
+  axis.title = element_text(size = 14),      # x and y axis labels
+  axis.text = element_text(size = 12),       # x and y axis tick labels
+  strip.text = element_text(size = 12),      # facet labels
+  legend.title = element_text(size = 12),   # legend title
+  legend.text = element_text(size = 10)     # legend items
+)
+```
+
+```{r}
+ggsave(
+  filename = "pred_all.png",
+  plot = pred_plot,
+  width = 8,
+  height = 6,
+  units = "in",
+  dpi = 300
+)
+```
+
+
+```{r}
+#Fixed effect model plots
+
+pred_group1_model <- predict_response(g1_fixed_model, 
+                                terms = c("centeredStep", 
+                                          "Distribution", 
+                                          "Familiarity"), 
+                                type="fixed")
+plot(pred_group1_model)
+
+pred_group2_model <- predict_response(g2_fixed_model, 
+                                terms = c("centeredStep", 
+                                          "Distribution", 
+                                          "Familiarity"), 
+                                type="fixed")
+plot(pred_group2_model)
+```
+
+```{r}
+#Fixed effect group average plots
+#need to add by-condition
+
+averageS9R.2 <- averageS9R
+
+averageS9R.2$Participant <- as.character(averageS9R.2$Participant )
+
+averageS9R.2 <- merge(averageS9R.2, clusters.df, by = "Participant")
+
+averageS9R.g1 <- averageS9R.2 %>% filter(Group == 1)
+averageS9R.g2 <- averageS9R.2 %>% filter(Group == 2)
+
+ggplot(averageS9R.g1, aes(x = centeredStep, y = step_average,
+               group = Participant, color = Participant)) +
+         facet_grid(Distribution ~ Familiarity) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  labs(
+    x = "Centered Step",
+    y = "Step Average",
+    color = "Participant"
+  ) +
+  theme_minimal()
+
+
+ggplot(averageS9R.g2, aes(x = centeredStep, y = step_average,
+               group = Participant, color = Participant)) +
+  facet_grid(Distribution ~ Familiarity) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  labs(
+    x = "Centered Step",
+    y = "Proportion Step Nine Respsonse - S9R",
+    color = "Participant"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+#relabel
+
+#group1
+pred_group1_model_recoded <- pred_group1_model %>%
+  as.data.frame() %>%
+  mutate(group = dplyr::recode(group,
+    "Non-Overlapping" = "Deterministic",
+    "Overlapping" = "Probabilistic"
+  ))
+  
+averageS9R.g1_recoded <- averageS9R.g1 %>%
+  mutate(Distribution = recode(Distribution,
+    "Non-Overlapping" = "Deterministic",
+    "Overlapping" = "Probabilistic"
+  ))
+
+g1_avg_S9R_recoded <- g1_avg_S9R %>%
+  mutate(Distribution = recode(Distribution,
+    "Non-Overlapping" = "Deterministic",
+    "Overlapping" = "Probabilistic"
+  ))
+
+#group2
+pred_group2_model_recoded <- pred_group2_model %>%
+  as.data.frame() %>%
+  mutate(group = dplyr::recode(group,
+    "Non-Overlapping" = "Deterministic",
+    "Overlapping" = "Probabilistic"
+  ))
+  
+averageS9R.g2_recoded <- averageS9R.g2 %>%
+  mutate(Distribution = recode(Distribution,
+    "Non-Overlapping" = "Deterministic",
+    "Overlapping" = "Probabilistic"
+  ))
+
+g2_avg_S9R_recoded <- g2_avg_S9R %>%
+  mutate(Distribution = recode(Distribution,
+    "Non-Overlapping" = "Deterministic",
+    "Overlapping" = "Probabilistic"
+  ))
+
+## all
+pred_main_model_recoded <- pred_main_model1 %>%
+  as.data.frame() %>%
+  mutate(group = dplyr::recode(group,
+    "Non-Overlapping" = "Deterministic",
+    "Overlapping" = "Probabilistic"
+  ))
+
+all_avg_S9R_recoded <- all_avg_S9R %>%
+  mutate(Distribution = recode(Distribution,
+    "Non-Overlapping" = "Deterministic",
+    "Overlapping" = "Probabilistic"
+  ))
+```
+
+
+```{r}
+
+#pred_g1_plot <- 
+  ggplot(pred_group1_model_recoded, aes(x = centeredStep, y = step_average, shape = Distribution, linetype = Familiarity)) +
+  #facet_grid(group ~ facet) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+    geom_ribbon(
+    data = ~ subset(.x, Familiarity == "Familiar"),
+    aes(ymin = conf.low, ymax = conf.high),
+    fill = "darkblue", alpha = 0.2, colour = NA
+  ) +
+    geom_point(size = 2) +
+    geom_ribbon(
+    data = ~ subset(.x, Familiarity == "Novel"),
+    aes(ymin = conf.low, ymax = conf.high),
+    fill = "red", alpha = 0.15, colour = NA
+  ) +
+  labs(
+    x = "Centered Step",
+    y = "Proportion Step 9 Response - S9R",
+    color = "Participant"
+  ) +
+  theme_minimal()
+
+#pred_g2_plot <- 
+  ggplot(pred_group2_model_recoded, aes(x = centeredStep, y = step_average, shape = Distribution, linetype = Familiarity)) +
+  #facet_grid(group ~ facet) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+    geom_ribbon(
+    data = ~ subset(.x, Familiarity == "Familiar"),
+    aes(ymin = conf.low, ymax = conf.high),
+    fill = "darkblue", alpha = 0.2, colour = NA
+  ) +
+    geom_point(size = 2) +
+    geom_ribbon(
+    data = ~ subset(.x, Familiarity == "Novel"),
+    aes(ymin = conf.low, ymax = conf.high),
+    fill = "red", alpha = 0.15, colour = NA
+  ) +
+  labs(
+    x = "Centered Step",
+    y = "Proportion Step 9 Response -S9R",
+    color = "Participant"
+  ) +
+  theme_minimal()
+
+
+```
+
+```{r}
+pred_group1_model_recoded$side <- "Distribution-Dominant"
+pred_group2_model_recoded$side <- "Familiarity-Dominant"
+
+pred_groups_together <- full_join(pred_group1_model_recoded,pred_group2_model_recoded)
+```
+```{r}
+#plotting together hopefully using facets
+pred_gs_plot <- 
+  ggplot(pred_groups_together, aes(x = centeredStep, y = step_average, shape = Distribution, linetype = Familiarity)) +
+  facet_grid( ~ side) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+    geom_ribbon(
+    data = ~ subset(.x, Familiarity == "Familiar"),
+    aes(ymin = conf.low, ymax = conf.high),
+    fill = "darkblue", alpha = 0.2, colour = NA
+  ) +
+    geom_point(size = 2) +
+    geom_ribbon(
+    data = ~ subset(.x, Familiarity == "Novel"),
+    aes(ymin = conf.low, ymax = conf.high),
+    fill = "red", alpha = 0.15, colour = NA
+  ) +
+  labs(
+    x = "Centered Step",
+    y = "Proportion Step 9 Response -S9R",
+    color = "Participant"
+  ) +
+  theme_minimal()+
+  theme(
+  axis.title = element_text(size = 14),      # x and y axis labels
+  axis.text = element_text(size = 12),       # x and y axis tick labels
+  strip.text = element_text(size = 12),      # facet labels
+  legend.title = element_text(size = 12),   # legend title
+  legend.text = element_text(size = 10)     # legend items
+)
+```
+
+```{r}
+ggsave(
+  filename = "pred_gs.png",
+  plot = pred_gs_plot,
+  width = 14,
+  height = 6,
+  units = "in",
+  dpi = 300
+)
+```
+
+
+```{r}
+ggsave(
+  filename = "pred_g1.png",
+  plot = pred_g1_plot,
+  width = 8,
+  height = 6,
+  units = "in",
+  dpi = 300
+)
+
+ggsave(
+  filename = "pred_g2.png",
+  plot = pred_g2_plot,
+  width = 8,
+  height = 6,
+  units = "in",
+  dpi = 300
+)
+```
+
+```{r}
+pred_g1_plot + pred_g2_plot
+```
+
+
+
+```{r}
+#predicted + mean
+
+colnames(pred_main_model_recoded) <- c("centeredStep", "step_average", "se", "conf.low", "conf.high", "Distribution", "Familiarity")
+
+pred_main_model_recoded$Type <- "Predicted"
+
+all_avg_S9R_recoded$Type <- "Actual"
+
+avg_and_pred_all <- full_join(all_avg_S9R_recoded, pred_main_model_recoded)
+
+avg_and_pred_all <- avg_and_pred_all %>% mutate(low = coalesce(se, conf.low))
+avg_and_pred_all <- avg_and_pred_all %>% mutate(high = coalesce(se, conf.high))
+
+avg_and_pred_all <- avg_and_pred_all %>%
+  mutate(
+    low  = ifelse(Type == "Actual", step_average - se, low),
+    high = ifelse(Type == "Actual", step_average + se, high)
+  )
+```
+
+
+```{r}
+pred_act_plot <- ggplot(avg_and_pred_all, aes(x = centeredStep, y = step_average, group = Type)) +
+  facet_grid(Distribution ~ Familiarity) +
+  geom_ribbon(
+    data = ~ subset(.x, Type == "Predicted"),
+    aes(ymin = low, ymax = high),
+    fill = "#00BFC4", alpha = 0.35, colour = NA
+  ) +
+  geom_errorbar(
+    data = ~ subset(.x, Type == "Actual"),
+    aes(ymin = low, ymax = high),
+    colour = "red", width = 0.1
+  ) +
+  geom_line(aes(linetype = Type, colour = Type), linewidth = 0.5) +
+  geom_point(aes(colour = Type), size = 2) +
+  scale_colour_manual(
+    name = "Type",
+    values = c("Actual" = "red", "Predicted" = "black")
+  ) +
+  scale_linetype_manual(
+    name = "Type",
+    values = c("Actual" = "dashed", "Predicted" = "solid")
+  ) +
+  labs(
+    x = "Centered Step",
+    y = "Proportion Step Nine Response - S9R"
+  ) +
+  theme_minimal()+
+  theme(
+  axis.title = element_text(size = 14),      # x and y axis labels
+  axis.text = element_text(size = 12),       # x and y axis tick labels
+  strip.text = element_text(size = 12),      # facet labels
+  legend.title = element_text(size = 12),   # legend title
+  legend.text = element_text(size = 10)     # legend items
+)
+```
+
+```{r}
+ggsave(
+  filename = "pred_actual_all.png",
+  plot = pred_act_plot,
+  width = 8,
+  height = 6,
+  units = "in",
+  dpi = 300
+)
+```
+
+
+
+```{r}
+#plotting groups predicted and individual
+
+g1_act_plot<-
+  ggplot(averageS9R.g1_recoded, aes(x = centeredStep, y = step_average,
+               group = Participant, color = Participant)) +
+  facet_grid(Distribution ~ Familiarity) +
+  geom_line(linewidth = 0.5) +
+  geom_point(size = 0) +
+  labs(
+    x = "Centered Step",
+    y = "Proportion Step Nine Respsonse - S9R",
+    color = "Participant"
+  ) +
+  theme_minimal()+
+  theme(
+  axis.title = element_text(size = 14),      # x and y axis labels
+  axis.text = element_text(size = 12),       # x and y axis tick labels
+  strip.text = element_text(size = 12),      # facet labels
+  legend.title = element_text(size = 12),   # legend title
+  legend.text = element_text(size = 10)     # legend items
+)
+
+
+g2_act_plot<-
+  ggplot(averageS9R.g2_recoded, aes(x = centeredStep, y = step_average,
+               group = Participant, color = Participant)) +
+  facet_grid(Distribution ~ Familiarity) +
+  geom_line(linewidth = 0.5) +
+  geom_point(size = 0) +
+  labs(
+    x = "Centered Step",
+    y = "Proportion Step Nine Respsonse - S9R",
+    color = "Participant"
+  ) +
+  theme_minimal()+
+  theme(
+  axis.title = element_text(size = 14),      # x and y axis labels
+  axis.text = element_text(size = 12),       # x and y axis tick labels
+  strip.text = element_text(size = 12),      # facet labels
+  legend.title = element_text(size = 12),   # legend title
+  legend.text = element_text(size = 10)     # legend items
+)
+```
+
+```{r}
+ggsave(
+  filename = "g1_act_plot.png",
+  plot = g1_act_plot,
+  width = 8,
+  height = 6,
+  units = "in",
+  dpi = 300
+)
+
+ggsave(
+  filename = "g2_act_plot.png",
+  plot = g2_act_plot,
+  width = 8,
+  height = 6,
+  units = "in",
+  dpi = 300
+)
+```
+
+
+```{r}
+#combine groups prediction and actual
+pred_group1_model_recoded$Type <- "Predicted"
+
+colnames(pred_group1_model_recoded) <- c("centeredStep", "step_average", "se", "conf.low", "conf.high", "Distribution", "Familiarity", "remove", "Type")
+
+pred_group1_model_recoded$remove <- NULL
+
+g1_avg_S9R_recoded$Type <- "Actual"
+
+avg_and_pred_g1 <- full_join(g1_avg_S9R_recoded, pred_group1_model_recoded)
+
+avg_and_pred_g1 <- avg_and_pred_g1 %>% mutate(low = coalesce(se, conf.low))
+avg_and_pred_g1 <- avg_and_pred_g1 %>% mutate(high = coalesce(se, conf.high))
+
+avg_and_pred_g1 <- avg_and_pred_g1 %>%
+  mutate(
+    low  = ifelse(Type == "Actual", step_average - se, conf.low),
+    high = ifelse(Type == "Actual", step_average + se, conf.high)
+  )
+
+##
+colnames(pred_group2_model_recoded) <- c("centeredStep", "step_average", "se", "conf.low", "conf.high", "Distribution", "Familiarity")
+
+pred_group2_model_recoded$Type <- "Predicted"
+
+g2_avg_S9R_recoded$Type <- "Actual"
+
+avg_and_pred_g2 <- full_join(g2_avg_S9R_recoded, pred_group2_model_recoded)
+
+#avg_and_pred_g2 <- avg_and_pred_g2 %>% mutate(low = coalesce(se, conf.low))
+#avg_and_pred_g2 <- avg_and_pred_g2 %>% mutate(high = coalesce(se, conf.high))
+
+avg_and_pred_g2 <- avg_and_pred_g2 %>%
+  mutate(
+    low  = ifelse(Type == "Actual", step_average - se, conf.low),
+    high = ifelse(Type == "Actual", step_average + se, conf.high)
+  )
+```
+
+```{r}
+#plotting g1
+pred_act_g1<-
+  ggplot(avg_and_pred_g1, aes(x = centeredStep, y = step_average, group = Type)) +
+  facet_grid(Distribution ~ Familiarity) +
+  geom_ribbon(
+    data = ~ subset(.x, Type == "Predicted"),
+    aes(ymin = low, ymax = high),
+    fill = "#00BFC4", alpha = 0.35, colour = NA
+  ) +
+  geom_errorbar(
+    data = ~ subset(.x, Type == "Actual"),
+    aes(ymin = low, ymax = high),
+    colour = "red", width = 0.1
+  ) +
+  geom_line(aes(linetype = Type, colour = Type), linewidth = 0.5) +
+  geom_point(aes(colour = Type), size = 2) +
+  scale_colour_manual(
+    name = "Type",
+    values = c("Actual" = "red", "Predicted" = "black")
+  ) +
+  scale_linetype_manual(
+    name = "Type",
+    values = c("Actual" = "dashed", "Predicted" = "solid")
+  ) +
+  labs(
+    x = "Centered Step",
+    y = "Proportion Step Nine Respsonse - S9R"
+  ) +
+  theme_minimal()+
+  theme(
+  axis.title = element_text(size = 14),      # x and y axis labels
+  axis.text = element_text(size = 12),       # x and y axis tick labels
+  strip.text = element_text(size = 12),      # facet labels
+  legend.title = element_text(size = 12),   # legend title
+  legend.text = element_text(size = 10)     # legend items
+)
+```
+
+
+```{r}
+#plotting g2
+pred_act_g2<-
+  ggplot(avg_and_pred_g2, aes(x = centeredStep, y = step_average, group = Type)) +
+  facet_grid(Distribution ~ Familiarity) +
+  geom_ribbon(
+    data = ~ subset(.x, Type == "Predicted"),
+    aes(ymin = low, ymax = high),
+    fill = "#00BFC4", alpha = 0.35, colour = NA
+  ) +
+  geom_errorbar(
+    data = ~ subset(.x, Type == "Actual"),
+    aes(ymin = low, ymax = high),
+    colour = "red", width = 0.1
+  ) +
+  geom_line(aes(linetype = Type, colour = Type), linewidth = 0.5) +
+  geom_point(aes(colour = Type), size = 2) +
+  scale_colour_manual(
+    name = "Type",
+    values = c("Actual" = "red", "Predicted" = "black")
+  ) +
+  scale_linetype_manual(
+    name = "Type",
+    values = c("Actual" = "dashed", "Predicted" = "solid")
+  ) +
+  labs(
+    x = "Centered Step",
+    y = "Proportion Step Nine Respsonse - S9R"
+  ) +
+  theme_minimal()+
+  theme(
+  axis.title = element_text(size = 14),      # x and y axis labels
+  axis.text = element_text(size = 12),       # x and y axis tick labels
+  strip.text = element_text(size = 12),      # facet labels
+  legend.title = element_text(size = 12),   # legend title
+  legend.text = element_text(size = 10)     # legend items
+)
+```
+
+
+```{r}
+ggsave(
+  filename = "pred_act_g1_plot.png",
+  plot = pred_act_g1,
+  width = 8,
+  height = 6,
+  units = "in",
+  dpi = 300
+)
+
+ggsave(
+  filename = "pred_act_g2_plot.png",
+  plot = pred_act_g2,
+  width = 8,
+  height = 6,
+  units = "in",
+  dpi = 300
+)
+```
+
+
+#Tables and Reporting
+```{r}
+#use MuMIn to get R2s - done
+#make tables of mean by condition?
+#make tables of betas for models, probably use sjplot
+#get model summaries - done
+#use confint to get confidence intervals - done
+```
+
+
+```{r}
+#empirical cdf for groups
+
+g1cdf <- ecdf(g1_avg_S9R_recoded$step_average)
+g2cdf <- ecdf(g2_avg_S9R_recoded$step_average)
+
+plot(g1cdf)
+plot(g2cdf)
+
+```
+
+```{r}
+
+allavgs <- as.data.frame(c(averageS9R.g1_recoded$step_average,
+             averageS9R.g2_recoded$step_average))
+
+allgrps <- as.data.frame(as.factor(c(averageS9R.g1_recoded$Group,
+             averageS9R.g2_recoded$Group)))
+
+dists4cdf <- cbind(allavgs,allgrps)
+
+
+colnames(dists4cdf) <- c("x", "Group")
+
+cdf_plot <- ggplot(dists4cdf, aes(x = x, colour = Group)) + 
+  stat_ecdf() +
+  labs(
+    y = "Cumulative Probability",
+    x = "Average Step Nine Response"
+  ) 
+  
+  
+  
+```
+
+```{r}
+ggsave(
+  filename = "cdf_plot.png",
+  plot = cdf_plot,
+  width = 8,
+  height = 6,
+  units = "in",
+  dpi = 300
+)
+```
+
