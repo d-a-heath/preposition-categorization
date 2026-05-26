@@ -1,8 +1,15 @@
 ---
-title: "Individual differences in the use of prior knowledge and distributional statistics during word learning RnR 2"
-output: html_notebook
+title: Individual differences in the use of prior knowledge and distributional statistics
+  during word learning
+output:
+  html_document:
+    df_print: paged
 ---
-#Setup
+
+# Setup
+
+## Packages
+
 ```{r}
 #Packages
 library("lme4")
@@ -16,11 +23,14 @@ library("MuMIn")
 library("patchwork")
 ```
 
+## Load and clean data
+
 ```{r}
 #Load data
-data.raw <- read_xlsx("C:/Users/daheath/OneDrive - The University of Memphis/Team-LaBlab - Preposition Categorization/0 - Data/Preposition Categorization Data.xlsx", sheet = 1)
+data.raw <- read_xlsx("C:/Users/daheath/OneDrive - The University of Memphis/Team-LaBlab - Experiments/preposition-categorization/Data/Preposition Categorization Data.xlsx", sheet = 1)
 ```
 
+Trial level exclusion tagging was done in excel, this filters out anything that was tagged for exclusion. Then, columns are renamed, variable types are set, and Step is centered.
 
 ```{r}
 #clean data
@@ -48,154 +58,19 @@ data$centeredStep <- (data$Step - 5)
 ```
 
 ```{r}
+#This removes the non-learners. Again, exclusion determination was initially done using excel, so these participants are manually excluded here for simplicity.
+
+#There is a codeblock below designed to verify this in R, but it is currently broken
+
 data.filtered <- data %>% filter(!Participant %in% c("4","5","7","13","19","24","31"))
 
-#This removes the non-learners
-```
-
-```{r}
-#individual performance
-step_avg_all <- function(x){
-  x %>%
-    #filter(Step %in% -4:4) %>%
-    group_by( centeredStep, Distribution, Familiarity) %>% #,Participant) %>%
-    summarise(step_average = mean(S9R, na.rm = TRUE), 
-    sd = sd(S9R, na.rm = TRUE),             # Calculate standard deviation
-    n = n(),                                   # Calculate sample size
-    se = sd / sqrt(n),
-    .groups = "drop")%>%
-  tidyr::complete(centeredStep = -4:4)# Participant,
-}
-
-step_avg_ind <- function(x){
-  x %>%
-    #filter(Step %in% -4:4) %>%
-    group_by(Participant, centeredStep, Distribution, Familiarity) %>% #) %>%
-    summarise(step_average = mean(S9R, na.rm = TRUE), 
-    sd = sd(S9R, na.rm = TRUE),             # Calculate standard deviation
-    n = n(),                                   # Calculate sample size
-    se = sd / sqrt(n),
-    .groups = "drop")%>%
-  tidyr::complete(Participant, centeredStep = -4:4)# 
-}
-```
-
-
-```{r}
-all_avg_S9R <- step_avg_all(data.filtered)
-
-averageS9R <- step_avg_ind(data.filtered)
-
-g1_avg_S9R <- data.withclusters %>% filter(Group == 1) %>% step_avg_all()
-
-g2_avg_S9R <- data.withclusters %>% filter(Group == 2) %>% step_avg_all()
-
-averageS9R_wide <- averageS9R %>% pivot_wider(names_from = centeredStep, values_from = step_average)
-```
-
-```{r}
-ggplot(averageS9R, aes(x = centeredStep, y = step_average,
-               group = Participant, color = Participant)) +
-  geom_line(linewidth = 1) +
-  geom_point(size = 2) +
-  labs(
-    x = "Centered Step",
-    y = "Proportion Step Nine Respsonse - S9R",
-    color = "Participant"
-  ) +
-  theme_minimal()
-
-averageS9R_filtered <- averageS9R %>% filter(!Participant %in% c("4","5","7","13","19","24","31"))
-
-learners <- 
-  ggplot(averageS9R_filtered, aes(x = centeredStep, y = step_average,
-               group = Participant, color = Participant)) +
-  geom_line(linewidth = 0.5) +
-  geom_point(size = 2) +
-  labs(
-    x = "Centered Step",
-    y = "Proportion Step Nine Respsonse - S9R",
-    color = "Participant"
-  ) +
-  theme_minimal()
-
-averageS9R_filtered2 <- averageS9R %>% filter(Participant %in% c("4","5","7","13","19","24","31"))
-
-nonlearners <- 
-  ggplot(averageS9R_filtered2, aes(x = centeredStep, y = step_average,
-               group = Participant, color = Participant)) +
-  geom_line(linewidth = 0.5) +
-  geom_point(size = 2) +
-  scale_y_continuous(limits = c(0, 1)) +
-  labs(
-    x = "Centered Step",
-    y = "Proportion Step Nine Respsonse - S9R",
-    color = "Participant"
-  ) +
-  theme_minimal()
-
-```
-
-```{r}
-ggsave(
-  filename = "learners.png",
-  plot = learners,
-  width = 8,
-  height = 6,
-  units = "in",
-  dpi = 300
-)
-
-ggsave(
-  filename = "nonlearners.png",
-  plot = nonlearners,
-  width = 8,
-  height = 6,
-  units = "in",
-  dpi = 300
-)
-```
-
-
-```{r}
-#filtering based on established criteria
-#within 1SD of Chance (50%) across 50% or more of continua steps. 
-
-step9_SD <- sd(averageS9R$step_average)
-
-ex_lower <- (.5 - (step9_SD/2))
-ex_upper <- ((step9_SD/2) + .5)
-
-#exclusion_range <- seq(ex_lower, ex_upper, by = 0.01)
-
-averageS9R_wide <- averageS9R_wide %>%
-  rowwise() %>%  
-  mutate(
-    n_in_range = sum(c_across(2:10) >= ex_lower & c_across(2:10) <= ex_upper)
-  ) %>%
-  ungroup()
-
-
-
-Include_list <- averageS9R_wide %>% 
-  filter(n_in_range <= 5) %>%
-  pull(Participant) %>%
-  as.character() %>%
-  unique()
-
-Exclude_list <- averageS9R_wide %>%
-  filter(n_in_range >= 6) %>%
-  pull(Participant) %>%
-  as.character() %>%
-  unique()
-
-#P24 has to be manually removed. They have a clear bias toward S9R
-#This is  mostly just a sanity check
 
 ```
 
 
 #Individual models
+
+These blocks are for both methods of getting by-participant coefficients (either as fixed effects or random effects). 
 ```{r}
 #Fixed effect model
 #I need to figure out what going on with the random effects here - why Participant or centeredStep?
@@ -228,6 +103,11 @@ parts_as_re <- glmer(S9R ~ centeredStep
 
 
 ```
+
+
+#Clusters
+
+Saving model results for clustering.
 
 ```{r}
 #save model coefficients for both fixed and re models
@@ -275,16 +155,10 @@ colnames(re_wide) <- c("grpvar",
 
 ```
 
-```{r}
-#filter fixed and random effects
-```
 
+Cluster optimization for participants as both fixed and random effects. Because we're going with fixed effects, this block also generates the groups from that set, as well as tagging a dataset with group labels.    
 
-```{r}
-#Correlations / Agreement
-```
-
-#Clusters
+For reference to the manuscript, g1 is the Distribution-Dominant Group, and g2 is the Familiarity-Dominant Group.
 ```{r}
 #Fixed cluster optimization
 
@@ -351,17 +225,179 @@ fviz_nbclust(re_wide_filtered[,c(3:6)], kmeans, nstart = 25,  method = "gap_stat
 
 
 
+## Looking at average performance
+
+These are some functions to calculate average Step Nine Response for all participants and each participant individually
+```{r}
+#individual performance
+step_avg_all <- function(x){
+  x %>%
+    #filter(Step %in% -4:4) %>%
+    group_by( centeredStep, Distribution, Familiarity) %>% #,Participant) %>%
+    summarise(step_average = mean(S9R, na.rm = TRUE), 
+    sd = sd(S9R, na.rm = TRUE),             # Calculate standard deviation
+    n = n(),                                   # Calculate sample size
+    se = sd / sqrt(n),
+    .groups = "drop")%>%
+  tidyr::complete(centeredStep = -4:4)# Participant,
+}
+
+step_avg_ind <- function(x){
+  x %>%
+    #filter(Step %in% -4:4) %>%
+    group_by(Participant, centeredStep, Distribution, Familiarity) %>% #) %>%
+    summarise(step_average = mean(S9R, na.rm = TRUE), 
+    sd = sd(S9R, na.rm = TRUE),             # Calculate standard deviation
+    n = n(),                                   # Calculate sample size
+    se = sd / sqrt(n),
+    .groups = "drop")%>%
+  tidyr::complete(Participant, centeredStep = -4:4)# 
+}
+```
+
+This applies the functions
+```{r}
+# all_avg_S9R <- step_avg_all(data.filtered)
+# 
+# averageS9R <- step_avg_ind(data.filtered)
+# 
+# g1_avg_S9R <- data.withclusters %>% filter(Group == 1) %>% step_avg_all()
+# 
+# g2_avg_S9R <- data.withclusters %>% filter(Group == 2) %>% step_avg_all()
+# 
+# averageS9R_wide <- averageS9R %>% pivot_wider(names_from = centeredStep, values_from = step_average)
+
+all_avg_S9R <- step_avg_all(data)
+
+averageS9R <- step_avg_ind(data)
+
+g1_avg_S9R <- data.withclusters %>% filter(Group == 1) %>% step_avg_all()
+
+g2_avg_S9R <- data.withclusters %>% filter(Group == 2) %>% step_avg_all()
+
+averageS9R_wide <- averageS9R %>% pivot_wider(names_from = centeredStep, values_from = step_average)
+
+averageS9R_wide <- averageS9R_wide %>% select(1, 7:15)
+
+averageS9R_wide_test <- averageS9R_wide %>% group_by(Participant) %>% summarise_all(list(mean), na.rm = TRUE)
+```
+
+Plotting average performance. 
+
+```{r}
+ggplot(averageS9R, aes(x = centeredStep, y = step_average,
+               group = Participant, color = Participant)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  labs(
+    x = "Centered Step",
+    y = "Proportion Step Nine Respsonse - S9R",
+    color = "Participant"
+  ) +
+  theme_minimal()
+
+averageS9R_filtered <- averageS9R %>% filter(!Participant %in% c("4","5","7","13","19","24","31"))
+
+learners <- 
+  ggplot(averageS9R_filtered, aes(x = centeredStep, y = step_average,
+               group = Participant, color = Participant)) +
+  geom_line(linewidth = 0.5) +
+  geom_point(size = 2) +
+  labs(
+    x = "Centered Step",
+    y = "Proportion Step Nine Respsonse - S9R",
+    color = "Participant"
+  ) +
+  theme_minimal()
+
+averageS9R_filtered2 <- averageS9R %>% filter(Participant %in% c("4","5","7","13","19","24","31"))
+
+nonlearners <- 
+  ggplot(averageS9R_filtered2, aes(x = centeredStep, y = step_average,
+               group = Participant, color = Participant)) +
+  geom_line(linewidth = 0.5) +
+  geom_point(size = 2) +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(
+    x = "Centered Step",
+    y = "Proportion Step Nine Respsonse - S9R",
+    color = "Participant"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+# ggsave(
+#   filename = "learners.png",
+#   plot = learners,
+#   width = 8,
+#   height = 6,
+#   units = "in",
+#   dpi = 300
+# )
+# 
+# ggsave(
+#   filename = "nonlearners.png",
+#   plot = nonlearners,
+#   width = 8,
+#   height = 6,
+#   units = "in",
+#   dpi = 300
+# )
+```
+
+This block is just to verify the exclusion criteria for "non-learners". Participant 24 is removed manually for showing a strong preference for a particular label (~75% S9R across all steps, suggesting they picked a label and stuck with it for each continuum) - this can be seen in plots in the Supplementary Material. 
+```{r}
+
+#filtering based on established criteria
+#within 1SD of Chance (50%) across 50% or more of continua steps. 
+
+step9_SD <- sd(averageS9R$step_average)
+
+ex_lower <- (.5 - (step9_SD/2))
+ex_upper <- ((step9_SD/2) + .5)
+
+#exclusion_range <- seq(ex_lower, ex_upper, by = 0.01)
+
+averageS9R_wide_test <- averageS9R_wide_test %>% #using the "test" variable name because I had to fix this, somewhere along the way the code for reshaping got deleted - oops. Fixed 5.26.26
+  rowwise() %>%  
+  mutate(
+    n_in_range = sum(c_across(2:10) >= ex_lower & c_across(2:10) <= ex_upper)
+  ) %>%
+  ungroup()
+
+
+
+Include_list <- averageS9R_wide_test %>% 
+  filter(n_in_range <= 5) %>%
+  pull(Participant) %>%
+  as.character() %>%
+  unique()
+
+Exclude_list <- averageS9R_wide_test %>%
+  filter(n_in_range >= 6) %>%
+  pull(Participant) %>%
+  as.character() %>%
+  unique()
+
+#P24 has to be manually removed. They have a clear bias toward S9R
+#This is  mostly just a sanity check
+
+```
+
+
+
 #Models
 
 ```{r}
 #Overall model
 
 main_model_ <- glmer(S9R ~ centeredStep
-               + centeredStep*Distribution*Familiarity #added for R1 - not significant      
-               #+ centeredStep:Distribution
-               #+ centeredStep:Familiarity
-               
-               + (1+centeredStep + Distribution + Familiarity|Participant) #makes small diff
+               + centeredStep:Distribution
+               + centeredStep:Familiarity
+               #+ centeredStep*Distribution*Familiarity #tested 3-way interaction - not significant 
+               + (1+centeredStep + Distribution + Familiarity|Participant) #added P as random slope
                + (1+centeredStep | Item), 
                data = data.filtered, 
                family = binomial, 
@@ -395,12 +431,8 @@ g2_fixed_model_ <- glmer(S9R ~ centeredStep
 
 ```
 
-```{r}
-#Random effects groups models
-# not even going to worry about it
-```
-
 #Plots
+
 ```{r}
 #Overall model plot
 
@@ -412,11 +444,9 @@ pred_main_model1 <- predict_response(main_model,
 plot(pred_main_model1)
 ```
 
-
 ```{r}
 colnames(pred_main_model_recoded) <- c("centeredStep", "step_average", "se", "conf.low", "conf.high", "Distribution", "Familiarity")
 ```
-
 
 ```{r}
 pred_plot <- 
@@ -451,16 +481,15 @@ pred_plot <-
 ```
 
 ```{r}
-ggsave(
-  filename = "pred_all.png",
-  plot = pred_plot,
-  width = 8,
-  height = 6,
-  units = "in",
-  dpi = 300
-)
+# ggsave(
+#   filename = "pred_all.png",
+#   plot = pred_plot,
+#   width = 8,
+#   height = 6,
+#   units = "in",
+#   dpi = 300
+# )
 ```
-
 
 ```{r}
 #Fixed effect model plots
@@ -577,7 +606,6 @@ all_avg_S9R_recoded <- all_avg_S9R %>%
   ))
 ```
 
-
 ```{r}
 
 #pred_g1_plot <- 
@@ -635,6 +663,7 @@ pred_group2_model_recoded$side <- "Familiarity-Dominant"
 
 pred_groups_together <- full_join(pred_group1_model_recoded,pred_group2_model_recoded)
 ```
+
 ```{r}
 #plotting together hopefully using facets
 pred_gs_plot <- 
@@ -669,42 +698,39 @@ pred_gs_plot <-
 ```
 
 ```{r}
-ggsave(
-  filename = "pred_gs.png",
-  plot = pred_gs_plot,
-  width = 14,
-  height = 6,
-  units = "in",
-  dpi = 300
-)
+# ggsave(
+#   filename = "pred_gs.png",
+#   plot = pred_gs_plot,
+#   width = 14,
+#   height = 6,
+#   units = "in",
+#   dpi = 300
+# )
 ```
 
-
 ```{r}
-ggsave(
-  filename = "pred_g1.png",
-  plot = pred_g1_plot,
-  width = 8,
-  height = 6,
-  units = "in",
-  dpi = 300
-)
-
-ggsave(
-  filename = "pred_g2.png",
-  plot = pred_g2_plot,
-  width = 8,
-  height = 6,
-  units = "in",
-  dpi = 300
-)
+# ggsave(
+#   filename = "pred_g1.png",
+#   plot = pred_g1_plot,
+#   width = 8,
+#   height = 6,
+#   units = "in",
+#   dpi = 300
+# )
+# 
+# ggsave(
+#   filename = "pred_g2.png",
+#   plot = pred_g2_plot,
+#   width = 8,
+#   height = 6,
+#   units = "in",
+#   dpi = 300
+# )
 ```
 
 ```{r}
 pred_g1_plot + pred_g2_plot
 ```
-
-
 
 ```{r}
 #predicted + mean
@@ -726,7 +752,6 @@ avg_and_pred_all <- avg_and_pred_all %>%
     high = ifelse(Type == "Actual", step_average + se, high)
   )
 ```
-
 
 ```{r}
 pred_act_plot <- ggplot(avg_and_pred_all, aes(x = centeredStep, y = step_average, group = Type)) +
@@ -766,17 +791,15 @@ pred_act_plot <- ggplot(avg_and_pred_all, aes(x = centeredStep, y = step_average
 ```
 
 ```{r}
-ggsave(
-  filename = "pred_actual_all.png",
-  plot = pred_act_plot,
-  width = 8,
-  height = 6,
-  units = "in",
-  dpi = 300
-)
+# ggsave(
+#   filename = "pred_actual_all.png",
+#   plot = pred_act_plot,
+#   width = 8,
+#   height = 6,
+#   units = "in",
+#   dpi = 300
+# )
 ```
-
-
 
 ```{r}
 #plotting groups predicted and individual
@@ -824,25 +847,24 @@ g2_act_plot<-
 ```
 
 ```{r}
-ggsave(
-  filename = "g1_act_plot.png",
-  plot = g1_act_plot,
-  width = 8,
-  height = 6,
-  units = "in",
-  dpi = 300
-)
-
-ggsave(
-  filename = "g2_act_plot.png",
-  plot = g2_act_plot,
-  width = 8,
-  height = 6,
-  units = "in",
-  dpi = 300
-)
+# ggsave(
+#   filename = "g1_act_plot.png",
+#   plot = g1_act_plot,
+#   width = 8,
+#   height = 6,
+#   units = "in",
+#   dpi = 300
+# )
+# 
+# ggsave(
+#   filename = "g2_act_plot.png",
+#   plot = g2_act_plot,
+#   width = 8,
+#   height = 6,
+#   units = "in",
+#   dpi = 300
+# )
 ```
-
 
 ```{r}
 #combine groups prediction and actual
@@ -886,7 +908,7 @@ avg_and_pred_g2 <- avg_and_pred_g2 %>%
 
 ```{r}
 #plotting g1
-pred_act_g1<-
+#pred_act_g1<-
   ggplot(avg_and_pred_g1, aes(x = centeredStep, y = step_average, group = Type)) +
   facet_grid(Distribution ~ Familiarity) +
   geom_ribbon(
@@ -924,9 +946,10 @@ pred_act_g1<-
 ```
 
 
+
 ```{r}
 #plotting g2
-pred_act_g2<-
+#pred_act_g2<-
   ggplot(avg_and_pred_g2, aes(x = centeredStep, y = step_average, group = Type)) +
   facet_grid(Distribution ~ Familiarity) +
   geom_ribbon(
@@ -964,35 +987,27 @@ pred_act_g2<-
 ```
 
 
-```{r}
-ggsave(
-  filename = "pred_act_g1_plot.png",
-  plot = pred_act_g1,
-  width = 8,
-  height = 6,
-  units = "in",
-  dpi = 300
-)
 
-ggsave(
-  filename = "pred_act_g2_plot.png",
-  plot = pred_act_g2,
-  width = 8,
-  height = 6,
-  units = "in",
-  dpi = 300
-)
+```{r}
+# ggsave(
+#   filename = "pred_act_g1_plot.png",
+#   plot = pred_act_g1,
+#   width = 8,
+#   height = 6,
+#   units = "in",
+#   dpi = 300
+# )
+# 
+# ggsave(
+#   filename = "pred_act_g2_plot.png",
+#   plot = pred_act_g2,
+#   width = 8,
+#   height = 6,
+#   units = "in",
+#   dpi = 300
+# )
 ```
 
-
-#Tables and Reporting
-```{r}
-#use MuMIn to get R2s - done
-#make tables of mean by condition?
-#make tables of betas for models, probably use sjplot
-#get model summaries - done
-#use confint to get confidence intervals - done
-```
 
 
 ```{r}
@@ -1017,18 +1032,31 @@ allgrps <- as.data.frame(as.factor(c(averageS9R.g1_recoded$Group,
 dists4cdf <- cbind(allavgs,allgrps)
 
 
-colnames(dists4cdf) <- c("x", "Group")
+colnames(dists4cdf) <- c("x", "Group_hold")
 
-cdf_plot <- ggplot(dists4cdf, aes(x = x, colour = Group)) + 
-  stat_ecdf() +
-  labs(
-    y = "Cumulative Probability",
-    x = "Average Step Nine Response"
-  ) 
+dists4cdf$Group <- recode_factor(dists4cdf$Group_hold, '1' = "Distribution-Dominant", '2' = "Familiarity-Dominant")
   
   
   
 ```
+
+```{r}
+cdf_plot <- 
+  ggplot(dists4cdf, aes(x = x, colour = Group)) + 
+  stat_ecdf() +
+  labs(
+    y = "Cumulative Probability",
+    x = "Average Step Nine Response") +
+  theme_minimal()+
+  theme(
+  axis.title = element_text(size = 14),      # x and y axis labels
+  axis.text = element_text(size = 12),       # x and y axis tick labels
+  strip.text = element_text(size = 12),      # facet labels
+  legend.title = element_text(size = 12),   # legend title
+  legend.text = element_text(size = 10)     # legend items
+  ) 
+```
+
 
 ```{r}
 ggsave(
@@ -1040,4 +1068,3 @@ ggsave(
   dpi = 300
 )
 ```
-
